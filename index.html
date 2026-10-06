@@ -749,24 +749,24 @@
   </div>
 </div>
 
-<!-- Firebase (compat) placeholders - replace firebaseConfig below in the script tag with your project config -->
+<!-- Firebase client SDK configuration is supplied by Vite from .env. -->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
 <script>
-  // Firebase web app config (pasted by user)
   const firebaseConfig = {
-    apiKey: "AIzaSyBOfgxhS2dqJc6aoIRqcV43-ajdQg9TkwM",
-    authDomain: "montagna-202fc.firebaseapp.com",
-    projectId: "montagna-202fc",
-    storageBucket: "montagna-202fc.firebasestorage.app",
-    messagingSenderId: "191894624928",
-    appId: "1:191894624928:web:39ee615552fabaa66707c5"
+    apiKey: "%VITE_FIREBASE_API_KEY%",
+    authDomain: "%VITE_FIREBASE_AUTH_DOMAIN%",
+    projectId: "%VITE_FIREBASE_PROJECT_ID%",
+    storageBucket: "%VITE_FIREBASE_STORAGE_BUCKET%",
+    messagingSenderId: "%VITE_FIREBASE_MESSAGING_SENDER_ID%",
+    appId: "%VITE_FIREBASE_APP_ID%"
   };
+  const firebaseConfigured = Object.values(firebaseConfig).every(value => value && !value.startsWith('%VITE_'));
   let __firebaseInitialized = false;
   function initFirebaseIfNeeded(){
     if (__firebaseInitialized) return;
-    if (!firebaseConfig) return; // nothing to do until user supplies config
+    if (!firebaseConfigured) return;
     try{
       firebase.initializeApp(firebaseConfig);
       firebase.db = firebase.firestore();
@@ -1936,7 +1936,7 @@
   // Store GPX text directly in Firestore documents (avoids requiring Storage/Blaze plan)
   async function uploadAllSavedToCloud(){
     initFirebaseIfNeeded();
-    if (!__firebaseInitialized){ alert('Firebase not configured. Paste firebaseConfig in the HTML head.'); return; }
+    if (!__firebaseInitialized){ alert('Firebase not configured. Set the Firebase values in .env and restart the app.'); return; }
     const saved = await loadAllSavedGPX();
     if (!saved || saved.length === 0) { alert('Nessun file salvato localmente da caricare.'); return; }
     const status = document.getElementById('savedStatus');
@@ -1958,7 +1958,7 @@
 
   async function listCloudFiles(){
     initFirebaseIfNeeded();
-    if (!__firebaseInitialized){ alert('Firebase not configured. Paste firebaseConfig in the HTML head.'); return; }
+    if (!__firebaseInitialized){ alert('Firebase not configured. Set the Firebase values in .env and restart the app.'); return; }
     const cloudList = document.getElementById('cloudList');
     cloudList.textContent = 'Caricamento...';
     try{
