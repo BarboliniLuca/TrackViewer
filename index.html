@@ -595,6 +595,9 @@
       max-height:calc(100% - 84px);
       overflow-y:auto;
       overscroll-behavior:contain;
+      user-select:none;
+      -webkit-user-select:none;
+      -webkit-touch-callout:none;
     }
     #elevationSvg{
       touch-action:none;
@@ -1920,6 +1923,7 @@
     svg.onpointercancel = event => {
       if (svg.hasPointerCapture(event.pointerId)) svg.releasePointerCapture(event.pointerId);
     };
+    svg.oncontextmenu = event => event.preventDefault();
     svg.onpointerleave = event => {
       if (event.pointerType !== 'mouse') return;
       cursorLine.style.display = 'none';
@@ -1951,6 +1955,7 @@
     svg.onpointerdown = null;
     svg.onpointerup = null;
     svg.onpointercancel = null;
+    svg.oncontextmenu = null;
     svg.onpointerleave = null;
     if (elevationCursorMarker){
       if (map.hasLayer(elevationCursorMarker)) map.removeLayer(elevationCursorMarker);
