@@ -596,6 +596,11 @@
       overflow-y:auto;
       overscroll-behavior:contain;
     }
+    #elevationSvg{
+      touch-action:none;
+      user-select:none;
+      -webkit-user-select:none;
+    }
 
     .mobile-nav{
       position:fixed;
@@ -1901,7 +1906,22 @@
       if (!map.hasLayer(elevationCursorMarker)) elevationCursorMarker.addTo(map);
       elevationCursorMarker.bringToFront();
     };
-    svg.onpointerleave = () => {
+    svg.onpointerdown = event => {
+      if (event.pointerType === 'mouse') return;
+      event.preventDefault();
+      svg.setPointerCapture(event.pointerId);
+      svg.onpointermove(event);
+    };
+    svg.onpointerup = event => {
+      if (event.pointerType !== 'mouse' && svg.hasPointerCapture(event.pointerId)){
+        svg.releasePointerCapture(event.pointerId);
+      }
+    };
+    svg.onpointercancel = event => {
+      if (svg.hasPointerCapture(event.pointerId)) svg.releasePointerCapture(event.pointerId);
+    };
+    svg.onpointerleave = event => {
+      if (event.pointerType !== 'mouse') return;
       cursorLine.style.display = 'none';
       readout.classList.remove('visible');
       if (elevationCursorMarker && map.hasLayer(elevationCursorMarker)) map.removeLayer(elevationCursorMarker);
@@ -1928,6 +1948,9 @@
     clearHeartRateMapOverlay();
     const svg = document.getElementById('elevationSvg');
     svg.onpointermove = null;
+    svg.onpointerdown = null;
+    svg.onpointerup = null;
+    svg.onpointercancel = null;
     svg.onpointerleave = null;
     if (elevationCursorMarker){
       if (map.hasLayer(elevationCursorMarker)) map.removeLayer(elevationCursorMarker);
