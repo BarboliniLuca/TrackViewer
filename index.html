@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sentiero — visualizzatore GPX</title>
+<title>Sentiero — visualizzatore GPX e FIT</title>
 
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -690,18 +690,18 @@
   <div class="sidebar">
     <div class="brand">
       <h1>Sentiero</h1>
-      <p>Importa le tue tracce GPX e guardale prendere forma sulla mappa.</p>
+      <p>Importa le tue tracce GPX o FIT e guardale prendere forma sulla mappa.</p>
     </div>
 
     <label class="dropzone" id="dropzone">
-      <div class="dz-title">Trascina qui i file GPX</div>
+      <div class="dz-title">Trascina qui i file GPX o FIT</div>
       <div class="dz-sub">oppure clicca per selezionarli</div>
-      <input type="file" id="fileInput" accept=".gpx" multiple />
+      <input type="file" id="fileInput" accept=".gpx,.fit" multiple />
     </label>
 
     <div class="folder-picker-row">
-      <button class="folder-picker-button" id="folderPickerButton" type="button">Scegli una cartella GPX</button>
-      <input type="file" id="folderInput" webkitdirectory directory multiple aria-label="Seleziona una cartella con file GPX" />
+      <button class="folder-picker-button" id="folderPickerButton" type="button">Scegli una cartella di tracce</button>
+      <input type="file" id="folderInput" webkitdirectory directory multiple aria-label="Seleziona una cartella con file GPX o FIT" />
     </div>
 
     <div class="privacy-note">
@@ -726,7 +726,7 @@
 
     <div class="track-list" id="trackList">
       <div class="empty-state" id="emptyState">
-        Nessuna traccia caricata.<br>Aggiungi un file GPX per iniziare.
+        Nessuna traccia caricata.<br>Aggiungi un file GPX o FIT per iniziare.
       </div>
     </div>
   </div>
@@ -804,6 +804,13 @@
   }
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script>
+  window.fitDecoderReady = new Promise((resolve, reject) => {
+    window.resolveFitDecoder = resolve;
+    window.rejectFitDecoder = reject;
+  });
+</script>
+<script type="module" src="/fit-decoder.js" onerror="window.rejectFitDecoder(new Error('Impossibile caricare il decoder FIT.'))"></script>
 <script>
 (function(){
 
@@ -1053,6 +1060,7 @@
           name,
           displayName: name,
           text,
+          format: 'gpx',
           source: source || detectGPXSourceFromText(name, text),
           created: Date.now()
         };
@@ -1061,6 +1069,42 @@
         rq.onerror = () => { db.close(); rej(rq.error); };
       });
     }catch(err){ console.warn('saveGPX failed', err); }
+  }
+
+  async function saveFIT(name, data, source = 'garmin'){
+    try{
+      const db = await openDb();
+      const bytes = new Uint8Array(data);
+      const existing = await new Promise((res, rej) => {
+        const tx = db.transaction(STORE_NAME, 'readonly');
+        const rq = tx.objectStore(STORE_NAME).getAll();
+        rq.onsuccess = () => res(rq.result || []);
+        rq.onerror = () => rej(rq.error);
+      });
+      for (const item of existing){
+        if (item.format !== 'fit' || !item.data) continue;
+        const savedBytes = new Uint8Array(item.data);
+        if (savedBytes.length === bytes.length && savedBytes.every((value, index) => value === bytes[index])){
+          db.close();
+          return item.id;
+        }
+      }
+
+      return await new Promise((res, rej) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const item = {
+          name,
+          displayName: name,
+          data: data.slice(0),
+          format: 'fit',
+          source,
+          created: Date.now()
+        };
+        const rq = tx.objectStore(STORE_NAME).add(item);
+        rq.onsuccess = () => { db.close(); res(rq.result); };
+        rq.onerror = () => { db.close(); rej(rq.error); };
+      });
+    }catch(err){ console.warn('saveFIT failed', err); }
   }
 
   async function loadAllSavedGPX(){
@@ -1132,7 +1176,7 @@
     }catch(err){ console.warn('updateSavedGPXMetadata failed', err); }
   }
 
-  // Load saved GPX files on startup (deduplicate identical files) and report diagnostics
+  // Load saved GPX and FIT files on startup (deduplicate identical files) and report diagnostics
   (async function(){
     const statusEl = document.getElementById('savedStatus');
     const saved = await loadAllSavedGPX();
@@ -1144,7 +1188,9 @@
     let loaded = 0, failed = 0, duplicates = 0;
     const seen = new Set();
     for (const item of saved){
-      const textKey = (item.text || '').trim();
+      const textKey = item.format === 'fit'
+        ? `fit:${Array.from(new Uint8Array(item.data)).join(',')}`
+        : `gpx:${(item.text || '').trim()}`;
       if (seen.has(textKey)){
         duplicates++;
         try{ await deleteSavedGPX(item.id); }catch(e){ console.warn('failed to delete duplicate', item.id, e); }
@@ -1152,7 +1198,10 @@
       }
       seen.add(textKey);
       try{
-        const parsed = parseGPX(item.text, (item.displayName || item.name || 'Traccia').replace(/\.gpx$/i, ''));
+        const name = item.displayName || item.name || 'Traccia';
+        const parsed = item.format === 'fit'
+          ? await window.fitDecoderReady.then(decodeFit => decodeFit(item.data, name.replace(/\.fit$/i, '')))
+          : parseGPX(item.text, name.replace(/\.gpx$/i, ''));
         if (parsed) {
           if (item.displayName) parsed.name = item.displayName;
           if (item.activity) parsed.activity = item.activity;
@@ -1585,7 +1634,7 @@
     const emptyEl = document.getElementById('emptyState') || document.createElement('div');
     emptyEl.id = 'emptyState';
     emptyEl.className = 'empty-state';
-    emptyEl.innerHTML = 'Nessuna traccia caricata.<br>Aggiungi un file GPX per iniziare.';
+    emptyEl.innerHTML = 'Nessuna traccia caricata.<br>Aggiungi un file GPX o FIT per iniziare.';
     listEl.innerHTML = '';
 
     const filteredTracks = tracks
@@ -1970,7 +2019,7 @@
   });
 
   // ---------- Cloud sync (Firebase) helpers ----------
-  // Store GPX text directly in Firestore documents (avoids requiring Storage/Blaze plan)
+  // Store GPX text or base64-encoded FIT data in Firestore documents.
   async function uploadAllSavedToCloud(){
     initFirebaseIfNeeded();
     if (!__firebaseInitialized){ alert('Firebase not configured. Set the Firebase values in .env and restart the app.'); return; }
@@ -1980,9 +2029,11 @@
     status.textContent = `Uploading ${saved.length} files...`;
     for (const item of saved){
       try{
+        const format = item.format || 'gpx';
         await firebase.db.collection('gpxFiles').add({
           name: item.displayName||item.name,
-          text: item.text || '',
+          text: format === 'fit' ? arrayBufferToBase64(item.data) : item.text || '',
+          format,
           source: item.source||'garmin',
           created: Date.now(),
           localId: item.id,
@@ -2007,13 +2058,21 @@
         const data = doc.data();
         const row = document.createElement('div');
         row.style.display = 'flex'; row.style.justifyContent = 'space-between'; row.style.alignItems='center'; row.style.marginBottom='6px';
-        const left = document.createElement('div'); left.textContent = (data.name || 'GPX') + ' · ' + (data.source || '—');
+        const left = document.createElement('div'); left.textContent = (data.name || 'Traccia') + ' · ' + (data.source || '—');
         const btn = document.createElement('button'); btn.textContent = 'Load'; btn.style.marginLeft='8px';
         btn.addEventListener('click', async (e) => {
           e.stopPropagation();
-          const txt = data.text || '';
-          const parsed = parseGPX(txt, (data.name||'Traccia'));
-          if (parsed) addTrack(parsed, null, data.source || 'garmin');
+          const name = data.name || 'Traccia';
+          try{
+            const parsed = data.format === 'fit'
+              ? await window.fitDecoderReady.then(decodeFit => decodeFit(base64ToArrayBuffer(data.text || ''), name.replace(/\.fit$/i, '')))
+              : parseGPX(data.text || '', name.replace(/\.gpx$/i, ''));
+            if (parsed) addTrack(parsed, null, data.source || 'garmin');
+            else alert('Non riesco a leggere "' + name + '": il file non sembra valido.');
+          }catch(err){
+            console.warn('cloud file parsing failed', name, err);
+            alert('Non riesco a leggere "' + name + '".');
+          }
         });
         row.appendChild(left); row.appendChild(btn);
         cloudList.appendChild(row);
@@ -2026,24 +2085,55 @@
   document.getElementById('listCloudBtn').addEventListener('click', (e) => { e.stopPropagation(); listCloudFiles(); });
 
   // ---------- File handling ----------
-  function handleFiles(fileList){
-    Array.from(fileList).forEach(file => {
-      if (!file.name.toLowerCase().endsWith('.gpx')) return;
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        const parsed = parseGPX(e.target.result, file.name.replace(/\.gpx$/i, ''));
+  function arrayBufferToBase64(buffer){
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    for (let offset = 0; offset < bytes.length; offset += 0x8000){
+      binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+    }
+    return btoa(binary);
+  }
+
+  function base64ToArrayBuffer(value){
+    const binary = atob(value);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes.buffer;
+  }
+
+  async function handleFile(file){
+    const filename = file.name.toLowerCase();
+    const isFit = filename.endsWith('.fit');
+    if (!isFit && !filename.endsWith('.gpx')) return;
+
+    try{
+      const fallbackName = file.name.replace(/\.(gpx|fit)$/i, '');
+      let parsed;
+      let savedId;
+      let source = 'garmin';
+      if (isFit){
+        const data = await file.arrayBuffer();
+        const decodeFit = await window.fitDecoderReady;
+        parsed = decodeFit(data, fallbackName);
+        if (parsed) savedId = await saveFIT(file.name, data, source);
+      } else {
+        const text = await file.text();
+        parsed = parseGPX(text, fallbackName);
         if (parsed){
-          const source = detectGPXSourceFromText(file.name, e.target.result);
-          try{
-            const savedId = await saveGPX(file.name, e.target.result, source).catch(()=>null);
-            addTrack(parsed, savedId || null, source);
-          }catch(err){ addTrack(parsed, null, source); }
-        } else {
-          alert('Non riesco a leggere "' + file.name + '": il file non sembra un GPX valido.');
+          source = detectGPXSourceFromText(file.name, text);
+          savedId = await saveGPX(file.name, text, source);
         }
-      };
-      reader.readAsText(file);
-    });
+      }
+      if (parsed) addTrack(parsed, savedId || null, source);
+      else alert('Non riesco a leggere "' + file.name + '": il file non sembra un GPX o FIT valido.');
+    }catch(err){
+      console.warn('File parsing failed', file.name, err);
+      alert('Non riesco a leggere "' + file.name + '".');
+    }
+  }
+
+  function handleFiles(fileList){
+    Array.from(fileList).forEach(file => handleFile(file));
   }
 
   const dropzone = document.getElementById('dropzone');
